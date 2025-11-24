@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Arrows under table</title>
+
+<style>
+  table { border-collapse: collapse; margin-bottom: 20px; }
+  td, th { border: 1px solid #000; padding: 6px 10px; }
+
+  /* Стрілки на канвасі */
+  #arrowsCanvas {
+    width: 100%;
+    height: 200px;
+    border: 1px solid #aaa;
+  }
+</style>
+</head>
+
+<body>
+
+<!-- 🔹 СЮДИ ВСТАВЛЯЄШ СВОЮ ТАБЛИЦЮ -->
+<div id="tableArea">
+  <!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Інтерактивна таблиця — баланс реакції</title>
+
+<style>
+  :root{ --accent:#2a9df4; --pos:#1e6ed1; --neg:#d13b3b; --border:#9aa;}
+  body{background:#f6f9fc; margin:0; padding:0; font-family:Arial, sans-serif;}
+  .chem-wrap{max-width:1200px; margin:24px auto; background:#fff; padding:16px; border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,0.08);}
+  .title{text-align:center; font-weight:700; margin-bottom:6px; font-size:20px;}
+  .eq{ text-align:center; margin-bottom:12px; font-size:18px;}
+  .formula-box{display:flex; gap:8px; justify-content:center; flex-wrap:wrap; align-items:center; margin-bottom:8px;}
+  .formula-part{display:inline-flex; align-items:center; gap:6px; font-weight:600;}
+
+  table.chem{border-collapse:collapse; width:100%;}
+  table.chem th, table.chem td{border:1px solid var(--border); padding:6px; text-align:center; min-width:46px; background:#fff; vertical-align:middle;}
+  table.chem th{background:#e6f0fb; font-weight:700;}
+  .elem-cell{background:#fafafa; font-weight:600;}
+  input.num{width:100%; box-sizing:border-box; border:0; text-align:center; font-size:14px; padding:4px; background:transparent;}
+  input.num:focus{outline:1px solid var(--accent); background:#eef7ff;}
+  .coef{width:48px; box-sizing:border-box; padding:4px; text-align:center; border-radius:6px; border:1px solid #d7eafb; background:#f8fbff;}
+  .mol-header{display:flex; flex-direction:column; gap:6px; align-items:center; justify-content:center;}
+  .mol-name{font-weight:700; font-size:14px;}
+  .mol-coef-label{font-size:11px; color:#555;}
+  .rp-cell{min-height:36px; min-width:64px; display:flex; align-items:center; justify-content:center; background:#fff; transition:color 0.15s, background 0.15s;}
+  .rp-zero{color:#333;}
+  .rp-pos{color:var(--pos); font-weight:700;}
+  .rp-neg{color:var(--neg); font-weight:700;}
+  .note{font-size:13px; color:#555; text-align:center; margin-top:8px;}
+  .mol-fallback{opacity:0.7; font-style:italic;}
+  /* Забороняємо перенесення для заголовка R-P, щоб бути в один рядок */
+  .rp-header{ white-space:nowrap; vertical-align:middle; }
+  /* small screens */
+  @media (max-width:880px){
+    .coef{width:40px;}
+    table.chem th, table.chem td{font-size:13px; padding:6px;}
+    .formula-box{font-size:15px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="chem-wrap">
+  <div class="title">Інтерактивна таблиця — баланс реакції</div>
+
+  <div class="eq" aria-live="polite">
+    <div class="formula-box" id="equation">
+      <!-- динамічне рівняння -->
+    </div>
+    <div style="font-size:13px; color:#444;">(Реагенти зліва — Продукти справа)</div>
+  </div>
+
+  <!-- Єдина таблиця, щоб вирівнювання рядків було точним -->
+  <table class="chem" id="mainTable" aria-label="Таблиця елементів і молекул">
+    <!-- Групова шапка -->
+    <thead>
+      <tr>
+        <th rowspan="2">Елемент</th>
+        <th colspan="3">Реагенти</th>
+        <th class="rp-header" rowspan="2">R − P</th>
+        <th colspan="5">Продукти</th>
+      </tr>
+      <tr id="moleculeHeaders">
+        <!-- тут будуть заголовки молекул (ім'я + input коефіцієнта) -->
+      </tr>
+    </thead>
+
+    <tbody id="elementsBody">
+      <!-- рядки елементів (заповнені скриптом) -->
+    </tbody>
+  </table>
+
+  <div class="note">Змінюй числа індексів або коефіцієнти — рівняння та різниця (R − P) оновлюються автоматично. Якщо коефіцієнт 0 — молекулу не показуємо; 1 — цифру 1 не показуємо.</div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  // Налаштування: список елементів і молекул
+  const elements = ["H","C","O","N","P","S","F","Na","Ca"];
+  const reactants = [
+    {id:"h2o", label:"H2O"},
+    {id:"co2", label:"CO2"},
+    {id:"o2",  label:"O2"}
+  ];
+  const products = [
+    {id:"h2",   label:"H2"},
+    {id:"o3",   label:"O3"},
+    {id:"h2co3",label:"H2CO3"},
+    {id:"n2",   label:"N2"},
+    {id:"nh3",  label:"NH3"}
+  ];
+
+  // Створимо заголовки з полями для коефіцієнтів
+  const headerRow = document.getElementById("moleculeHeaders");
+  function makeMolHeaderCell(mol){
+    const th = document.createElement("th");
+    th.innerHTML = `
+      <div class="mol-header">
+        <div class="mol-name" data-mol="${mol.id}" id="name_${mol.id}">${mol.label}</div>
+        <div class="mol-coef-label">
+          <input class="coef" aria-label="Коефіцієнт ${mol.id}" data-mol="${mol.id}" type="number" min="0" step="1" value="1">
+        </div>
+      </div>`;
+    return th;
+  }
+  // Додаємо заголовки
+  reactants.forEach(m => headerRow.appendChild(makeMolHeaderCell(m)));
+  products.forEach(m => headerRow.appendChild(makeMolHeaderCell(m)));
+
+  // Створимо тіло таблиці (рядок на кожен елемент)
+  const body = document.getElementById("elementsBody");
+  elements.forEach(elem => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="elem-cell">${elem}</td>`;
+
+    // для кожного реагента — input індексів
+    reactants.forEach(m => {
+      const td = document.createElement("td");
+      td.innerHTML = `<input class="num cell left" data-mol="${m.id}" data-elem="${elem}" type="number" value="${defaultIndex(m.id, elem)}" min="0" step="1" aria-label="${m.id} ${elem}">`;
+      tr.appendChild(td);
+    });
+
+    // R-P cell
+    tr.innerHTML += `<td class="rp-cell" id="rp_${elem}">0</td>`;
+
+    // для кожного продукту — input індексів
+    products.forEach(m => {
+      const td = document.createElement("td");
+      td.innerHTML = `<input class="num cell right" data-mol="${m.id}" data-elem="${elem}" type="number" value="${defaultIndex(m.id, elem)}" min="0" step="1" aria-label="${m.id} ${elem}">`;
+      tr.appendChild(td);
+    });
+
+    body.appendChild(tr);
+  });
+
+  // Значення за замовчуванням (від вашої початкової таблиці)
+  function defaultIndex(mol, elem){
+    const map = {
+      h2o: {H:2,O:1},
+      co2: {C:1,O:2},
+      o2:  {O:2},
+      h2:  {H:2},
+      o3:  {O:3},
+      h2co3:{H:2,C:1,O:3},
+      n2:  {N:2},
+      nh3: {N:1,H:3}
+    };
+    return (map[mol] && map[mol][elem]) ? map[mol][elem] : 0;
+  }
+
+  // Доступ до всіх input-ів
+  function qAll(selector){ return Array.from(document.querySelectorAll(selector)); }
+
+  // Створити формулу молекули як HTML, читаючи індекси з таблиці
+  // Всі числа звичайного розміру: наприклад H2O, H2CO3, 2H2O (коефіцієнт перед формулою, теж звичайний розмір)
+  function buildFormulaHTML(molId){
+    let parts = [];
+    elements.forEach(el => {
+      const input = document.querySelector(`.cell[data-mol="${molId}"][data-elem="${el}"]`);
+      const val = input ? Number(input.value) || 0 : 0;
+      if(val > 0){
+        parts.push(el + (val > 1 ? `${val}` : ""));
+      }
+    });
+    // якщо немає елементів (вся формула "порожня") — показати id як запас
+    if(parts.length === 0) return `<span class="mol-fallback">${molId}</span>`;
+    return parts.join("");
+  }
+
+  // Побудова рівняння у верхній частині (реагенти = продукти) — числа у звичайному розмірі
+  function buildEquation(){
+    const leftParts = [];
+    reactants.forEach(m => {
+      const coefInput = document.querySelector(`.coef[data-mol="${m.id}"]`);
+      const coef = coefInput ? Number(coefInput.value) || 0 : 0;
+      if(coef === 0) return; // не показуємо
+      const formula = buildFormulaHTML(m.id);
+      const prefix = coef > 1 ? `${coef}` : "";
+      leftParts.push(prefix + formula);
+    });
+    const rightParts = [];
+    products.forEach(m => {
+      const coefInput = document.querySelector(`.coef[data-mol="${m.id}"]`);
+      const coef = coefInput ? Number(coefInput.value) || 0 : 0;
+      if(coef === 0) return;
+      const formula = buildFormulaHTML(m.id);
+      const prefix = coef > 1 ? `${coef}` : "";
+      rightParts.push(prefix + formula);
+    });
+
+    const joiner = ' <span style="color:#666; font-weight:600">+</span> ';
+    const leftHTML = leftParts.length ? leftParts.join(joiner) : '<span style="color:#999">—</span>';
+    const rightHTML = rightParts.length ? rightParts.join(joiner) : '<span style="color:#999">—</span>';
+
+    const eqBox = document.getElementById("equation");
+    eqBox.innerHTML = `<div class="formula-part">${leftHTML}</div><div style="font-weight:700; padding:0 8px"> = </div><div class="formula-part">${rightHTML}</div>`;
+  }
+
+  // Обчислення різниці R - P по кожному елементу і оновлення стилю
+  function updateDifference(){
+    elements.forEach(elem => {
+      let leftSum = 0;
+      qAll(`.left[data-elem="${elem}"]`).forEach(input => leftSum += Number(input.value) || 0);
+      let rightSum = 0;
+      qAll(`.right[data-elem="${elem}"]`).forEach(input => rightSum += Number(input.value) || 0);
+      const diff = leftSum - rightSum;
+      const cell = document.getElementById(`rp_${elem}`);
+      cell.textContent = diff;
+      cell.classList.remove("rp-pos","rp-neg","rp-zero");
+      if(diff > 0) cell.classList.add("rp-pos");
+      else if(diff < 0) cell.classList.add("rp-neg");
+      else cell.classList.add("rp-zero");
+    });
+  }
+
+  // При зміні будь-чого: індексу або коефіцієнта — оновлюємо формули і різницю
+  function onChangeHandler(){
+    // Оновлюємо назви молекул над заголовками (щоб індекси відображались одразу)
+    [...reactants, ...products].forEach(m => {
+      const nameEl = document.getElementById(`name_${m.id}`);
+      if(nameEl) nameEl.innerHTML = buildFormulaHTML(m.id);
+    });
+
+    buildEquation();
+    updateDifference();
+  }
+
+  // Прив'язка подій
+  qAll("input.num").forEach(inp => inp.addEventListener("input", onChangeHandler));
+  qAll("input.coef, .coef").forEach(inp => inp.addEventListener("input", onChangeHandler));
+
+  // Ініціалізація: знайдемо всі інпути .coef та .cell (які ми додали динамічно) і підвісимо події ще раз
+  setTimeout(() => {
+    qAll("input.num").forEach(inp => inp.addEventListener("input", onChangeHandler));
+    qAll("input.coef").forEach(inp => inp.addEventListener("input", onChangeHandler));
+    // Встановимо початкові коефіцієнти: якщо формула порожня — 0, інакше 1
+    [...reactants, ...products].forEach(m => {
+      const coef = document.querySelector(`.coef[data-mol="${m.id}"]`);
+      const any = elements.some(el => Number(document.querySelector(`.cell[data-mol="${m.id}"][data-elem="${el}"]`).value) > 0);
+      if(coef) coef.value = any ? coef.value || 1 : 0;
+    });
+    onChangeHandler();
+  }, 0);
+
+});
+</script>
+
+</body>
+</html>
+</div>
+
+<!-- 🔹 Канвас ПІД таблицею -->
+<canvas id="arrowsCanvas"></canvas>
+
+<script>
+// ==== Приклад логіки малювання однієї стрілки =====
+const canvas = document.getElementById("arrowsCanvas");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+}
+
+resizeCanvas();
+
+// Малюємо синю стрілочку вправо під таблицею
+function drawArrow() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.beginPath();
+  ctx.moveTo(50, 100);   // точка старту
+  ctx.lineTo(200, 100);  // кінець стрілки
+  ctx.strokeStyle = "blue";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // наконечник
+  ctx.beginPath();
+  ctx.moveTo(200, 100);
+  ctx.lineTo(180, 90);
+  ctx.lineTo(180, 110);
+  ctx.closePath();
+  ctx.fillStyle = "blue";
+  ctx.fill();
+}
+
+drawArrow();
+</script>
+
+</body>
+</html>
