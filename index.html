@@ -116,6 +116,10 @@
         <option value="none">none (as is)</option>
       </select>
     </div>
+    <label style="font-size:13px;color:#333; display:flex; align-items:center; gap:6px;">
+      <input type="checkbox" id="independentVectors">
+      Показувати вектори з початку координат
+    </label>
   </div>
 
   <div class="layout">
@@ -394,7 +398,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // localStorage
   function collectState(){
-    const state = { coeffs: {}, cells: {}, axes: {}, orderR: null, orderP: null, axisSelects: {} , reactants:[], products:[], elements:[]};
+    const state = { coeffs: {}, cells: {}, axes: {}, orderR: null, orderP: null, axisSelects: {} , reactants:[], products:[], elements:[], independentVectors: false};
     qAll('.coef').forEach(inp => {
       const mol = inp.dataset.mol;
       state.coeffs[mol] = Math.max(0, Math.min(MAX_COEF, Math.floor(Number(inp.value) || 0)));
@@ -415,6 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if(ry) state.axes.y = ry;
     state.orderR = q('#orderR')?.value || null;
     state.orderP = q('#orderP')?.value || null;
+    state.independentVectors = Boolean(q('#independentVectors')?.checked);
 
     state.reactants = reactants.slice();
     state.products = products.slice();
@@ -476,11 +481,15 @@ document.addEventListener("DOMContentLoaded", () => {
           if(sel) sel.value = state.axes.y;
         }
       }
-      if(state.orderR && q('#orderR')) q('#orderR').value = state.orderR;
-      if(state.orderP && q('#orderP')) q('#orderP').value = state.orderP;
-    }catch(e){
-      console.warn("restoreState: couldn't restore fully", e);
+    if(state.orderR && q('#orderR')) q('#orderR').value = state.orderR;
+    if(state.orderP && q('#orderP')) q('#orderP').value = state.orderP;
+    if(typeof state.independentVectors === 'boolean'){
+      const toggle = q('#independentVectors');
+      if(toggle) toggle.checked = state.independentVectors;
     }
+  }catch(e){
+    console.warn("restoreState: couldn't restore fully", e);
+  }
   }
 
   function saveState(){
@@ -649,6 +658,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const inp = q(`.cell[data-mol="${molId}"][data-elem="${elemName}"]`);
       return inp ? Math.max(0, Math.floor(Number(inp.value) || 0)) : 0;
     }
+    const independentVectors = Boolean(q('#independentVectors')?.checked);
     const orderR = q('#orderR')?.value || 'auto';
     const orderP = q('#orderP')?.value || 'auto';
     function orderList(list, orderPref, defaultBehavior){
@@ -664,6 +674,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const reactantsOrdered = orderList([...reactants], orderR, 'asc');
     const productsOrdered  = orderList([...products],  orderP, 'desc');
+
+    function sumProjectedTotals(molList){
+      return molList.reduce((acc, mol) => {
+        const coef = Math.max(0, Math.min(MAX_COEF, Math.floor(Number(q(`.coef[data-mol="${mol.id}"]`)?.value || 0))));
+        if(coef === 0) return acc;
+        acc.x += readCountRaw(mol.id, axes.x) * coef;
+        acc.y += readCountRaw(mol.id, axes.y) * coef;
+        return acc;
+      }, { x: 0, y: 0 });
+    }
 
     function buildCumulativePathByInstancesOrdered(molListOrdered){
       const pts = []; let current = { x: 0, y: 0 }; pts.push({ x: current.x, y: current.y, label: null });
@@ -682,17 +702,42 @@ document.addEventListener("DOMContentLoaded", () => {
       return pts;
     }
 
-    const ptsR = buildCumulativePathByInstancesOrdered(reactantsOrdered);
-    const ptsP = buildCumulativePathByInstancesOrdered(productsOrdered);
+    function buildIndependentVectors(molListOrdered){
+      const vectors = [];
+      molListOrdered.forEach((mol) => {
+        const coefInput = q(`.coef[data-mol="${mol.id}"]`);
+        const coef = coefInput ? Math.max(0, Math.min(MAX_COEF, Math.floor(Number(coefInput.value) || 0))) : 0;
+        if(coef === 0) return;
+        const vx = readCountRaw(mol.id, axes.x);
+        const vy = readCountRaw(mol.id, axes.y);
+        if(vx === 0 && vy === 0) return;
+        vectors.push({ x: vx, y: vy, label: mol.label });
+      });
+      return vectors;
+    }
 
-    const allPoints = []; ptsR.forEach(p => allPoints.push(p)); ptsP.forEach(p => allPoints.push(p)); allPoints.push({ x: 0, y: 0 });
+    const totalsR = sumProjectedTotals(reactants);
+    const totalsP = sumProjectedTotals(products);
+    const ptsR = independentVectors ? [] : buildCumulativePathByInstancesOrdered(reactantsOrdered);
+    const ptsP = independentVectors ? [] : buildCumulativePathByInstancesOrdered(productsOrdered);
+    const vectorsR = independentVectors ? buildIndependentVectors(reactantsOrdered) : [];
+    const vectorsP = independentVectors ? buildIndependentVectors(productsOrdered) : [];
 
-    const visibleReactants = reactantsOrdered.some(m => {
+    const allPoints = [{ x: 0, y: 0 }];
+    if(independentVectors){
+      vectorsR.forEach(v => allPoints.push({ x: v.x, y: v.y }));
+      vectorsP.forEach(v => allPoints.push({ x: v.x, y: v.y }));
+    } else {
+      ptsR.forEach(p => allPoints.push(p));
+      ptsP.forEach(p => allPoints.push(p));
+    }
+
+    const visibleReactants = independentVectors ? vectorsR.length > 0 : reactantsOrdered.some(m => {
       const coef = Math.max(0, Math.min(MAX_COEF, Math.floor(Number(q(`.coef[data-mol="${m.id}"]`)?.value || 0))));
       const vx = readCountRaw(m.id, axes.x); const vy = readCountRaw(m.id, axes.y);
       return coef > 0 && (vx !== 0 || vy !== 0);
     });
-    const visibleProducts = productsOrdered.some(m => {
+    const visibleProducts = independentVectors ? vectorsP.length > 0 : productsOrdered.some(m => {
       const coef = Math.max(0, Math.min(MAX_COEF, Math.floor(Number(q(`.coef[data-mol="${m.id}"]`)?.value || 0))));
       const vx = readCountRaw(m.id, axes.x); const vy = readCountRaw(m.id, axes.y);
       return coef > 0 && (vx !== 0 || vy !== 0);
@@ -723,6 +768,21 @@ document.addEventListener("DOMContentLoaded", () => {
       if(mappingNoteEl) mappingNoteEl.textContent = '';
       const note = methodDefEl && methodDefEl.querySelector('.applicability-note');
       if(note) note.remove();
+    }
+    if(methodDefEl){
+      let modeNote = methodDefEl.querySelector('.mode-note');
+      if(independentVectors){
+        if(!modeNote){
+          modeNote = document.createElement('div');
+          modeNote.className = 'mode-note';
+          modeNote.style.marginTop = '8px';
+          modeNote.style.color = '#444';
+          methodDefEl.appendChild(modeNote);
+        }
+        modeNote.textContent = 'Режим незалежних векторів: коефіцієнти ігноруються, кожна молекула має один вектор з (0,0).';
+      } else if(modeNote){
+        modeNote.remove();
+      }
     }
 
     // bounding and scaling
@@ -903,11 +963,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const colorR = "#5da0e8"; const colorP = "#e85d5d";
-    drawSegmentsWithArrows(ptsR, colorR, "arrowR", -1);
-    drawSegmentsWithArrows(ptsP, colorP, "arrowP", +1);
+    if(independentVectors){
+      vectorsR.forEach(v => drawSegmentsWithArrows([{ x: 0, y: 0, label: null }, { x: v.x, y: v.y, label: v.label }], colorR, "arrowR", -1));
+      vectorsP.forEach(v => drawSegmentsWithArrows([{ x: 0, y: 0, label: null }, { x: v.x, y: v.y, label: v.label }], colorP, "arrowP", +1));
+    } else {
+      drawSegmentsWithArrows(ptsR, colorR, "arrowR", -1);
+      drawSegmentsWithArrows(ptsP, colorP, "arrowP", +1);
+    }
 
-    const endR = ptsR.length ? ptsR[ptsR.length - 1] : { x: 0, y: 0 };
-    const endP = ptsP.length ? ptsP[ptsP.length - 1] : { x: 0, y: 0 };
+    const endR = independentVectors ? totalsR : (ptsR.length ? ptsR[ptsR.length - 1] : { x: 0, y: 0 });
+    const endP = independentVectors ? totalsP : (ptsP.length ? ptsP[ptsP.length - 1] : { x: 0, y: 0 });
 
     function buildEquationLeftSide(){
       const parts = [];
@@ -969,33 +1034,22 @@ document.addEventListener("DOMContentLoaded", () => {
           <div style="display:flex; gap:20px; margin-top:12px; font-size:13px;">
             <div><span style="color:#5da0e8; font-weight:700;">🔵 Реактанти:</span> ${reactFormula}</div>
             <div><span style="color:#e85d5d; font-weight:700;">🔴 Продукти:</span> ${prodFormula}</div>
-          </div>`;
+          </div>${independentVectors ? '<div style="margin-top:8px; font-size:13px; color:#555;">Незалежні вектори показані від (0,0); коефіцієнти не відображені.</div>' : ''}`;
       } else {
         legend.innerHTML = `<div style="margin-bottom: 8px;">❌ <b>Not balanced</b> — End_R = (${endR.x}, ${endR.y}), End_P = (${endP.x}, ${endP.y})</div>
           <div style="display:flex; gap:20px; margin-top: 12px; font-size:13px;">
             <div><span style="color:#5da0e8; font-weight:700;">🔵 Реактанти:</span> ${reactFormula}</div>
             <div><span style="color:#e85d5d; font-weight:700;">🔴 Продукти:</span> ${prodFormula}</div>
-          </div>`;
+          </div>${independentVectors ? '<div style="margin-top:8px; font-size:13px; color:#555;">Незалежні вектори показані від (0,0); коефіцієнти не відображені.</div>' : ''}`;
       }
     }
 
     // update mapping note
-    let sumR_x = 0, sumR_y = 0, sumP_x = 0, sumP_y = 0;
-    reactants.forEach(m => {
-      const coef = Math.max(0, Math.min(MAX_COEF, Math.floor(Number(q(`.coef[data-mol="${m.id}"]`)?.value || 0))));
-      sumR_x += (function(){ const input = q(`.cell[data-mol="${m.id}"][data-elem="${axes.x}"]`); return input ? Math.max(0, Math.floor(Number(input.value)||0)) : 0; })() * coef;
-      sumR_y += (function(){ const input = q(`.cell[data-mol="${m.id}"][data-elem="${axes.y}"]`); return input ? Math.max(0, Math.floor(Number(input.value)||0)) : 0; })() * coef;
-    });
-    products.forEach(m => {
-      const coef = Math.max(0, Math.min(MAX_COEF, Math.floor(Number(q(`.coef[data-mol="${m.id}"]`)?.value || 0))));
-      sumP_x += (function(){ const input = q(`.cell[data-mol="${m.id}"][data-elem="${axes.x}"]`); return input ? Math.max(0, Math.floor(Number(input.value)||0)) : 0; })() * coef;
-      sumP_y += (function(){ const input = q(`.cell[data-mol="${m.id}"][data-elem="${axes.y}"]`); return input ? Math.max(0, Math.floor(Number(input.value)||0)) : 0; })() * coef;
-    });
-    const rpProjX = sumR_x - sumP_x; const rpProjY = sumR_y - sumP_y;
+    const rpProjX = totalsR.x - totalsP.x; const rpProjY = totalsR.y - totalsP.y;
     if(mappingNoteEl){
       mappingNoteEl.innerHTML = `<div><b>Проєкція (осі ${axes.x}, ${axes.y}):</b></div>
         <div>R−P (з урахуванням коефіцієнтів) = (${rpProjX}, ${rpProjY}) = End_R − End_P (геометрично)</div>
-        <div style="color:#665; margin-top:4px;">Примітка: у візуалізації кожна молекула з коефіцієнтом k відтворюється як k окремих сегментів.</div>`;
+        <div style="color:#665; margin-top:4px;">${independentVectors ? 'Примітка: у режимі незалежних векторів коефіцієнти не застосовуються до довжин векторів.' : 'Примітка: у візуалізації кожна молекула з коефіцієнтом k відтворюється як k окремих сегментів.'}</div>`;
     }
 
     saveStateDebounced();
@@ -1057,6 +1111,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if(orderRSelect) orderRSelect.onchange = () => drawVectors();
   const orderPSelect = q('#orderP');
   if(orderPSelect) orderPSelect.onchange = () => drawVectors();
+  const independentToggle = q('#independentVectors');
+  if(independentToggle) independentToggle.onchange = () => drawVectors();
 
   window.addEventListener('resize', () => drawVectors());
   window.addEventListener('beforeunload', saveState);
